@@ -49,18 +49,12 @@ def callback():
     user_id = user_res.get('id')
 
     member_res = requests.get(
-    f"{API_ENDPOINT}/users/@me/guilds/{GUILD_ID}/member",
-    headers={'Authorization': f'Bearer {access_token}'}
-).json()
+        f"{API_ENDPOINT}/users/@me/guilds/{GUILD_ID}/member",
+        headers={'Authorization': f'Bearer {access_token}'}
+    ).json()
 
-if not isinstance(member_res, dict) or 'roles' not in member_res:
-    return jsonify({
-        "error": "Failed to fetch member data",
-        "discord_response": member_res
-    }), 400
-
-roles = member_res.get('roles', [])
-is_vip = VIP_ROLE_ID in roles
+    roles = member_res.get('roles', [])
+    is_vip = VIP_ROLE_ID in roles
 
     session['user'] = {
         "id": user_id,
