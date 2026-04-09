@@ -6,13 +6,13 @@ app = Flask(__name__)
 app.secret_key = 'UMD_MAP_SUPER_SECRET'
 
 # --- ข้อมูลที่คุณกำหนดมา ---
-CLIENT_ID = '1475967234462716056'
-CLIENT_SECRET = 'fcuEOdfJSNQmxA9-rUQicBFfG5iLJ-t1'
-REDIRECT_URI = 'http://localhost:5000/callback' 
+CLIENT_ID = '1491883509881634827'
+CLIENT_SECRET = 'dCpICFZsRIb0VQoSdZA3AN3SSxWbCusB'
+REDIRECT_URI = 'https://wumap-t43k.onrender.com/callback' 
 API_ENDPOINT = 'https://discord.com/api/v10'
 
-GUILD_ID = '1383315989676167308'
-VIP_ROLE_ID = '1471970015115874486' 
+GUILD_ID = '1339593466748866621'
+VIP_ROLE_ID = '1339656831005364274' 
 # -----------------------
 
 @app.route('/')
