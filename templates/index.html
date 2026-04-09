@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>UMD MAP </title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
+    <style>
+        #map { height: calc(100vh - 60px); width: 100%; background-color: #0fa8d2; }
+        #mapSelector { position: absolute; top: 70px; right: 20px; z-index: 1000; background: #2f3136; color: white; padding: 8px; border-radius: 5px; }
+    </style>
+</head>
+<body class="bg-[#36393f] font-sans m-0 overflow-hidden">
+
+    <nav class="flex justify-between items-center bg-[#202225] px-5 h-[60px] text-white shadow-md relative z-[1001]">
+        <div class="flex items-center gap-4">
+            <span class="font-bold text-xl text-[#5865F2]">UMD MAP</span>
+            <a href="https://sites.google.com/view/medicrulesuniversal" target="_blank" class="text-[#dcddde] hover:text-white text-sm">กฎหมอ</a>
+        </div>
+
+        <div id="user-section">
+            {% if user %}
+                <div class="flex items-center gap-3">
+                    <div class="flex items-center gap-2 bg-[#2f3136] pr-4 pl-1 py-1 rounded-full">
+                        <img src="{{ user.avatar }}" class="w-7 h-7 rounded-full">
+                        <span class="text-sm font-medium">{{ user.username }}</span>
+                    </div>
+                    <a href="/logout" class="text-xs text-[#ed4245] hover:underline">ออกจากระบบ</a>
+                </div>
+            {% else %}
+                <button onclick="window.location.href='/login'" class="bg-[#5865F2] hover:bg-[#4752c4] px-4 py-2 rounded font-bold text-sm flex items-center gap-2">
+                    เข้าสู่ระบบด้วย Discord
+                </button>
+            {% endif %}
+        </div>
+    </nav>
+
+    <main>
+        {% if not user %}
+            <div class="flex flex-col items-center justify-center h-[80vh] text-white">
+                <h1 class="text-4xl font-bold mb-4">ยินดีต้อนรับสู่ UMD MAP</h1>
+                <p class="text-gray-400 mb-8">กรุณาล็อกอินเพื่อเข้าใช้งานระบบแผนที่</p>
+                <button onclick="window.location.href='/login'" class="bg-[#5865F2] text-xl px-8 py-4 rounded-xl font-bold hover:scale-105 transition-transform">
+                    LOGIN WITH DISCORD
+                </button>
+            </div>
+        {% elif user and not user.is_vip %}
+            <div class="max-w-md mx-auto mt-20 p-10 bg-[#2f3136] rounded-xl border-2 border-[#ed4245] text-center text-white">
+                <h2 class="text-3xl font-bold text-[#ed4245] mb-4">ออกไปซะ!</h2>
+                <p class="text-lg">ไม่ใชเรื่องของมึง <b>อย่าเสือกกกก!!!</b></p>
+                <p class="text-sm text-gray-500 mt-4">Discord ID: {{ user.id }}</p>
+            </div>
+        {% else %}
+            <select id="mapSelector">
+                <option value="map1">Atlas View</option>
+                <option value="map2">Satellite View</option>
+            </select>
+            <div id="map"></div>
+        {% endif %}
+    </main>
+
+    {% if user and user.is_vip %}
+    <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+    <script>
+        const imageWidth = 8192;
+        const imageHeight = 8192;
+        const imageBounds = [[0, 0], [imageHeight, imageWidth]];
+
+        const map = L.map('map', { crs: L.CRS.Simple, minZoom: -4, maxZoom: 2 });
+
+        const maps = {
+            map1: { layer: L.imageOverlay('/static/img/map1.png', imageBounds), bgColor: "#0fa8d2" },
+            map2: { layer: L.imageOverlay('/static/img/map2.png', imageBounds), bgColor: "#143d6b" }
+        };
+
+        let currentLayer = maps.map1.layer.addTo(map);
+        map.fitBounds(imageBounds);
+
+        document.getElementById('mapSelector').addEventListener('change', (e) => {
+            map.removeLayer(currentLayer);
+            const selected = maps[e.target.value];
+            currentLayer = selected.layer.addTo(map);
+            document.getElementById('map').style.backgroundColor = selected.bgColor;
+        });
+
+        const offsetX = 6487; const offsetY = 9474;
+        function gtaToLeaflet(gameX, gameY) { return [-gameY + offsetY, gameX + offsetX]; }
+        function customIcon(name) { return L.icon({ iconUrl: '/static/img/' + name + '.png', iconSize: [20, 20] }); }
+
+        fetch('/api/locations')
+            .then(response => response.json())
+            .then(data => {
+                data.forEach(loc => {
+                    L.marker(gtaToLeaflet(loc.x, loc.y), { icon: customIcon(loc.icon) })
+                     .addTo(map)
+                     .bindPopup(loc.name);
+                });
+            })
+            .catch(err => console.error("Error loading locations:", err));
+    </script>
+    {% endif %}
+</body>
+</html>
