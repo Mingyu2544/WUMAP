@@ -15,7 +15,7 @@
 
     <nav class="flex justify-between items-center bg-[#202225] px-5 h-[60px] text-white shadow-md relative z-[1001]">
         <div class="flex items-center gap-4">
-            <span class="font-bold text-xl text-[#5865F2]">UMD MAP</span>
+            <span class="font-bold text-xl text-[#5865F2]">Universal Medical Map</span>
             <a href="https://sites.google.com/view/medicrulesuniversal" target="_blank" class="text-[#dcddde] hover:text-white text-sm">กฎหมอ</a>
         </div>
 
@@ -39,7 +39,7 @@
     <main>
         {% if not user %}
             <div class="flex flex-col items-center justify-center h-[80vh] text-white">
-                <h1 class="text-4xl font-bold mb-4">ยินดีต้อนรับสู่ UMD MAP</h1>
+                <h1 class="text-4xl font-bold mb-4">ยินดีต้อนรับสู่ Universal Medical Map</h1>
                 <p class="text-gray-400 mb-8">กรุณาล็อกอินเพื่อเข้าใช้งานระบบแผนที่</p>
                 <button onclick="window.location.href='/login'" class="bg-[#5865F2] text-xl px-8 py-4 rounded-xl font-bold hover:scale-105 transition-transform">
                     LOGIN WITH DISCORD
@@ -47,8 +47,8 @@
             </div>
         {% elif user and not user.is_vip %}
             <div class="max-w-md mx-auto mt-20 p-10 bg-[#2f3136] rounded-xl border-2 border-[#ed4245] text-center text-white">
-                <h2 class="text-3xl font-bold text-[#ed4245] mb-4">ออกไปซะ!</h2>
-                <p class="text-lg">ไม่ใชเรื่องของมึง <b>อย่าเสือกกกก!!!</b></p>
+                <h2 class="text-3xl font-bold text-[#ed4245] mb-4">คุณไม่มีสิทธิ์เข้าถึงข้อมูล!</h2>
+                <p class="text-lg">กรุณาทำการเช็คสิทธิ์ <b>เพื่อเข้าถึงข้อมูล</b></p>
                 <p class="text-sm text-gray-500 mt-4">Discord ID: {{ user.id }}</p>
             </div>
         {% else %}
