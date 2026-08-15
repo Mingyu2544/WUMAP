@@ -1,5 +1,4 @@
 import os
-import time
 from urllib.parse import urlencode
 
 from flask import Flask, request, redirect, render_template, session
@@ -89,67 +88,44 @@ def callback():
         'Accept': 'application/json'
     }
 
-    # Discord/Cloudflare อาจตอบ 429 ชั่วคราว โดยเฉพาะตอน Render
-    # ถูกเรียก OAuth หลายครั้งติดกัน เราจะเคารพ Retry-After และลองใหม่
-    # เพียงครั้งเดียว เพื่อไม่สร้าง rate-limit loop
-    token_response = None
-
-    for attempt in range(2):
-        try:
-            token_response = requests.post(
-                f'{API_ENDPOINT}/oauth2/token',
-                data=data,
-                headers=headers,
-                auth=(CLIENT_ID, CLIENT_SECRET),
-                timeout=20
-            )
-        except requests.RequestException as exc:
-            app.logger.exception('Discord token request failed: %s', exc)
-            return (
-                '<h2>เชื่อมต่อ Discord ไม่สำเร็จ</h2>'
-                '<p>กรุณากลับหน้าแรกแล้วลองใหม่อีกครั้ง</p>'
-                '<p><a href="/">กลับหน้าแรก</a></p>',
-                502
-            )
-
-        if token_response.status_code != 429:
-            break
-
-        retry_after_raw = token_response.headers.get('Retry-After', '30')
-        try:
-            retry_after = max(1, min(int(float(retry_after_raw)), 60))
-        except (TypeError, ValueError):
-            retry_after = 30
-
-        app.logger.warning(
-            'Discord token exchange rate limited (429). Retry-After=%ss attempt=%s/2',
-            retry_after, attempt + 1
+    # สำคัญ: ห้าม sleep ตาม Retry-After ภายใน /callback
+    # เพราะ Render proxy อาจตัด request เป็น HTTP 502 ก่อนที่ Flask จะตอบกลับ
+    # เมื่อ Discord/Cloudflare ส่ง 429 ให้แจ้งผู้ใช้ทันทีและไม่ยิงซ้ำ
+    try:
+        token_response = requests.post(
+            f'{API_ENDPOINT}/oauth2/token',
+            data=data,
+            headers=headers,
+            auth=(CLIENT_ID, CLIENT_SECRET),
+            timeout=15
         )
-
-        if attempt == 0:
-            time.sleep(retry_after)
-
-    if token_response is None:
+    except requests.RequestException as exc:
+        app.logger.exception('Discord token request failed: %s', exc)
         return (
-            '<h2>ไม่สามารถเชื่อมต่อ Discord ได้</h2>'
-            '<p><a href="/">กลับหน้าแรก</a></p>',
+            '<!doctype html><html lang="th"><head><meta charset="utf-8">'
+            '<meta name="viewport" content="width=device-width, initial-scale=1">'
+            '<title>เชื่อมต่อ Discord ไม่สำเร็จ</title></head><body>'
+            '<h2>เชื่อมต่อ Discord ไม่สำเร็จ</h2>'
+            '<p>เซิร์ฟเวอร์ไม่สามารถติดต่อ Discord ได้ในขณะนี้</p>'
+            '<p><a href="/">กลับหน้าแรก</a></p>'
+            '</body></html>',
             502
         )
 
     if token_response.status_code == 429:
         retry_after_raw = token_response.headers.get('Retry-After', '30')
-        app.logger.error(
-            'Discord token exchange still rate limited after retry: HTTP 429 | Retry-After=%s | %s',
+        app.logger.warning(
+            'Discord token exchange rate limited: HTTP 429 | Retry-After=%s | %s',
             retry_after_raw,
             token_response.text[:1000]
         )
         return (
-            '<!doctype html>'
-            '<html lang="th"><head><meta charset="utf-8">'
+            '<!doctype html><html lang="th"><head><meta charset="utf-8">'
+            '<meta name="viewport" content="width=device-width, initial-scale=1">'
             '<title>Discord ชั่วคราว</title></head><body>'
             '<h2>Discord กำลังจำกัดการเชื่อมต่อชั่วคราว</h2>'
-            '<p>ระบบได้รับ HTTP 429 จาก Discord/Cloudflare</p>'
-            f'<p>กรุณารอประมาณ {retry_after_raw} วินาที แล้วลอง Login ใหม่อีกครั้ง</p>'
+            '<p>Discord/Cloudflare แจ้งว่าให้รอก่อนลองใหม่</p>'
+            f'<p>แนะนำให้รอประมาณ {retry_after_raw} วินาที แล้วกด Login ใหม่เพียงครั้งเดียว</p>'
             '<p><a href="/">กลับหน้าแรก</a></p>'
             '</body></html>',
             429
