@@ -27,7 +27,8 @@ VIP_ROLE_ID = os.environ.get('DISCORD_VIP_ROLE_ID', '1339656831005364274')
 
 def discord_headers(access_token=None):
     headers = {
-        'Accept': 'application/json'
+        'Accept': 'application/json',
+        'User-Agent': 'WUMAP/1.0 (Discord OAuth2)'
     }
     if access_token:
         headers['Authorization'] = f'Bearer {access_token}'
@@ -80,12 +81,15 @@ def callback():
     data = {
         'grant_type': 'authorization_code',
         'code': code,
-        'redirect_uri': REDIRECT_URI
+        'redirect_uri': REDIRECT_URI,
+        'client_id': CLIENT_ID,
+        'client_secret': CLIENT_SECRET
     }
 
     headers = {
         'Content-Type': 'application/x-www-form-urlencoded',
-        'Accept': 'application/json'
+        'Accept': 'application/json',
+        'User-Agent': 'WUMAP/1.0 (Discord OAuth2)'
     }
 
     # สำคัญ: ห้าม sleep ตาม Retry-After ภายใน /callback
@@ -96,7 +100,6 @@ def callback():
             f'{API_ENDPOINT}/oauth2/token',
             data=data,
             headers=headers,
-            auth=(CLIENT_ID, CLIENT_SECRET),
             timeout=15
         )
     except requests.RequestException as exc:
@@ -113,19 +116,44 @@ def callback():
         )
 
     if token_response.status_code == 429:
-        retry_after_raw = token_response.headers.get('Retry-After', '30')
+        # Discord can return Retry-After in the header and/or retry_after in JSON.
+        # Do not trust/display a huge raw value from a proxy as a user-facing countdown.
+        retry_after = None
+        try:
+            body = token_response.json()
+            retry_after = body.get('retry_after')
+        except ValueError:
+            body = {}
+
+        if retry_after is None:
+            retry_after = token_response.headers.get('Retry-After')
+
+        try:
+            retry_after_num = float(retry_after) if retry_after is not None else None
+        except (TypeError, ValueError):
+            retry_after_num = None
+
         app.logger.warning(
-            'Discord token exchange rate limited: HTTP 429 | Retry-After=%s | %s',
-            retry_after_raw,
+            'Discord token exchange rate limited: HTTP 429 | Retry-After=%s | body=%s',
+            retry_after,
             token_response.text[:1000]
         )
+
+        wait_text = 'ชั่วคราว'
+        if retry_after_num is not None and 0 < retry_after_num <= 3600:
+            if retry_after_num < 60:
+                wait_text = f'ประมาณ {int(round(retry_after_num))} วินาที'
+            else:
+                wait_text = f'ประมาณ {int(round(retry_after_num / 60))} นาที'
+
         return (
             '<!doctype html><html lang="th"><head><meta charset="utf-8">'
             '<meta name="viewport" content="width=device-width, initial-scale=1">'
             '<title>Discord ชั่วคราว</title></head><body>'
             '<h2>Discord กำลังจำกัดการเชื่อมต่อชั่วคราว</h2>'
-            '<p>Discord/Cloudflare แจ้งว่าให้รอก่อนลองใหม่</p>'
-            f'<p>แนะนำให้รอประมาณ {retry_after_raw} วินาที แล้วกด Login ใหม่เพียงครั้งเดียว</p>'
+            '<p>Discord/Cloudflare กำลังจำกัดคำขอจากเซิร์ฟเวอร์ของเรา</p>'
+            f'<p>กรุณารอ {wait_text} แล้วค่อยลอง Login ใหม่ 1 ครั้ง</p>'
+            '<p>ถ้ายังขึ้นข้อความนี้ซ้ำ ให้หยุดกด Login และตรวจ Render Logs เพราะอาจเป็นการจำกัด IP ของ Render</p>'
             '<p><a href="/">กลับหน้าแรก</a></p>'
             '</body></html>',
             429
