@@ -1,6 +1,7 @@
 from flask import Flask, request, redirect, render_template, session
 import requests
 from flask import jsonify
+from urllib.parse import urlencode
 
 app = Flask(__name__)
 app.secret_key = 'UMD_MAP_SUPER_SECRET'
@@ -22,47 +23,223 @@ def index():
 
 @app.route('/login')
 def login():
-    discord_auth_url = (
-        f"https://discord.com/api/oauth2/authorize"
-        f"?client_id={CLIENT_ID}&redirect_uri={REDIRECT_URI}"
-        f"&response_type=code&scope=identify+guilds.members.read"
-    )
+    params = {
+        'client_id': CLIENT_ID,
+        'redirect_uri': REDIRECT_URI,
+        'response_type': 'code',
+        'scope': 'identify guilds.members.read'
+    }
+    discord_auth_url = 'https://discord.com/api/oauth2/authorize?' + urlencode(params)
     return redirect(discord_auth_url)
+
+
+def discord_headers(access_token=None):
+    headers = {
+        'User-Agent': 'WUMAP/1.0 (Discord OAuth2)',
+        'Accept': 'application/json'
+    }
+    if access_token:
+        headers['Authorization'] = f'Bearer {access_token}'
+    return headers
+
+
+def discord_error_page(title, detail, status=502):
+    html = f"""<!doctype html>
+<html lang='th'>
+<head><meta charset='utf-8'><title>{title}</title></head>
+<body style='font-family:Arial,sans-serif;padding:30px;line-height:1.6'>
+<h2>{title}</h2>
+<p>{detail}</p>
+<p><a href='/'>กลับหน้าแรก</a></p>
+</body></html>"""
+    return html, status
+
 
 @app.route('/callback')
 def callback():
     code = request.args.get('code')
-    if not code: return redirect('/')
+    if not code:
+        return redirect('/')
 
     data = {
-        'client_id': CLIENT_ID, 'client_secret': CLIENT_SECRET,
-        'grant_type': 'authorization_code', 'code': code, 'redirect_uri': REDIRECT_URI
+        'client_id': CLIENT_ID,
+        'client_secret': CLIENT_SECRET,
+        'grant_type': 'authorization_code',
+        'code': code,
+        'redirect_uri': REDIRECT_URI
     }
-    headers = {'Content-Type': 'application/x-www-form-urlencoded'}
-    token_res = requests.post(f"{API_ENDPOINT}/oauth2/token", data=data, headers=headers).json()
+    headers = {
+        'Content-Type': 'application/x-www-form-urlencoded',
+        **discord_headers()
+    }
+
+    try:
+        token_response = requests.post(
+            f"{API_ENDPOINT}/oauth2/token",
+            data=data,
+            headers=headers,
+            timeout=15
+        )
+    except requests.RequestException:
+        app.logger.exception('Discord token request failed')
+        return discord_error_page(
+            'เชื่อมต่อ Discord ไม่สำเร็จ',
+            'Render ไม่สามารถเชื่อมต่อ Discord ได้ชั่วคราว กรุณาลองใหม่ภายหลัง',
+            502
+        )
+
+    if token_response.status_code == 429:
+        retry_after = token_response.headers.get('Retry-After', '30')
+        try:
+            retry_seconds = max(1, min(int(float(retry_after)), 3600))
+        except (ValueError, TypeError):
+            retry_seconds = 30
+        app.logger.warning(
+            'Discord token exchange rate limited: HTTP 429 | Retry-After=%s | body=%s',
+            retry_after, token_response.text[:1000]
+        )
+        return discord_error_page(
+            'Discord กำลังจำกัดการเชื่อมต่อชั่วคราว',
+            f'Discord/Cloudflare กำลังจำกัดคำขอจากเซิร์ฟเวอร์ของเรา กรุณารอประมาณ {retry_seconds} วินาที แล้วกด Login ใหม่เพียงครั้งเดียว',
+            429
+        )
+
+    if not token_response.ok:
+        app.logger.error(
+            'Discord token exchange failed: HTTP %s | body=%s',
+            token_response.status_code, token_response.text[:2000]
+        )
+        return discord_error_page(
+            'Discord Login ไม่สำเร็จ',
+            f'Discord ปฏิเสธการขอ Token (HTTP {token_response.status_code}) กรุณาลอง Login ใหม่อีกครั้ง',
+            502
+        )
+
+    try:
+        token_res = token_response.json()
+    except ValueError:
+        app.logger.error('Discord token response was not JSON: %s', token_response.text[:2000])
+        return discord_error_page(
+            'Discord ส่งข้อมูลกลับมาไม่ถูกต้อง',
+            'ได้รับข้อมูลจาก Discord ที่ไม่ใช่ JSON กรุณาลองใหม่อีกครั้ง',
+            502
+        )
+
     access_token = token_res.get('access_token')
+    if not access_token:
+        app.logger.error('Discord token response missing access_token: %s', token_res)
+        return discord_error_page(
+            'ไม่พบ Access Token จาก Discord',
+            'Discord ไม่ได้ส่ง Access Token กลับมา กรุณาลอง Login ใหม่',
+            502
+        )
 
-    if not access_token: return redirect('/')
+    try:
+        user_response = requests.get(
+            f"{API_ENDPOINT}/users/@me",
+            headers=discord_headers(access_token),
+            timeout=15
+        )
+    except requests.RequestException:
+        app.logger.exception('Discord user request failed')
+        return discord_error_page(
+            'อ่านข้อมูล Discord ไม่สำเร็จ',
+            'ไม่สามารถอ่านข้อมูลบัญชี Discord ได้ กรุณาลองใหม่อีกครั้ง',
+            502
+        )
 
-    user_res = requests.get(f"{API_ENDPOINT}/users/@me", 
-                            headers={'Authorization': f'Bearer {access_token}'}).json()
+    if not user_response.ok:
+        app.logger.error(
+            'Discord /users/@me failed: HTTP %s | body=%s',
+            user_response.status_code, user_response.text[:2000]
+        )
+        return discord_error_page(
+            'อ่านข้อมูล Discord ไม่สำเร็จ',
+            f'Discord ตอบกลับ HTTP {user_response.status_code}',
+            502
+        )
+
+    try:
+        user_res = user_response.json()
+    except ValueError:
+        app.logger.error('Discord user response was not JSON: %s', user_response.text[:2000])
+        return discord_error_page(
+            'ข้อมูลผู้ใช้ Discord ไม่ถูกต้อง',
+            'Discord ส่งข้อมูลบัญชีกลับมาไม่ถูกต้อง',
+            502
+        )
+
     user_id = user_res.get('id')
+    if not user_id:
+        return discord_error_page(
+            'ไม่พบ Discord User ID',
+            'ไม่สามารถอ่าน User ID จาก Discord ได้',
+            502
+        )
 
-    member_res = requests.get(
-        f"{API_ENDPOINT}/users/@me/guilds/{GUILD_ID}/member",
-        headers={'Authorization': f'Bearer {access_token}'}
-    ).json()
+    try:
+        member_response = requests.get(
+            f"{API_ENDPOINT}/users/@me/guilds/{GUILD_ID}/member",
+            headers=discord_headers(access_token),
+            timeout=15
+        )
+    except requests.RequestException:
+        app.logger.exception('Discord guild member request failed')
+        return discord_error_page(
+            'ตรวจสอบสิทธิ์ Discord ไม่สำเร็จ',
+            'ไม่สามารถตรวจสอบสมาชิก/Role ในเซิร์ฟเวอร์ Discord ได้',
+            502
+        )
+
+    if member_response.status_code == 429:
+        app.logger.warning(
+            'Discord guild member rate limited: Retry-After=%s',
+            member_response.headers.get('Retry-After', '30')
+        )
+        return discord_error_page(
+            'Discord กำลังจำกัดการเชื่อมต่อชั่วคราว',
+            'Discord จำกัดคำขอตรวจสอบ Role กรุณารอสักครู่แล้วลอง Login ใหม่',
+            429
+        )
+
+    if not member_response.ok:
+        app.logger.error(
+            'Discord guild member failed: HTTP %s | body=%s',
+            member_response.status_code, member_response.text[:2000]
+        )
+        return discord_error_page(
+            'ตรวจสอบ VIP Role ไม่สำเร็จ',
+            f'Discord ตอบกลับ HTTP {member_response.status_code} ตอนตรวจสอบสมาชิกในเซิร์ฟเวอร์',
+            502
+        )
+
+    try:
+        member_res = member_response.json()
+    except ValueError:
+        app.logger.error('Discord member response was not JSON: %s', member_response.text[:2000])
+        return discord_error_page(
+            'ข้อมูล Role จาก Discord ไม่ถูกต้อง',
+            'Discord ส่งข้อมูลสมาชิกกลับมาไม่ถูกต้อง',
+            502
+        )
 
     roles = member_res.get('roles', [])
     is_vip = VIP_ROLE_ID in roles
 
+    avatar_hash = user_res.get('avatar')
+    if avatar_hash:
+        avatar_url = f"https://cdn.discordapp.com/avatars/{user_id}/{avatar_hash}.png"
+    else:
+        avatar_url = 'https://cdn.discordapp.com/embed/avatars/0.png'
+
     session['user'] = {
-        "id": user_id,
-        "username": user_res.get('username'),
-        "avatar": f"https://cdn.discordapp.com/avatars/{user_id}/{user_res.get('avatar')}.png",
-        "is_vip": is_vip
+        'id': user_id,
+        'username': user_res.get('username'),
+        'avatar': avatar_url,
+        'is_vip': is_vip
     }
-    
+    session.modified = True
+
     return redirect('/')
 
 
